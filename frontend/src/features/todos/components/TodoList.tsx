@@ -6,9 +6,11 @@ import { useDeleteTodo, useToggleTodo } from "../api/todos";
 
 interface TodoListProps {
   todos: Todo[];
+  selectedIds?: string[];
+  onSelect?: (id: string, selected: boolean) => void;
 }
 
-export function TodoList({ todos }: TodoListProps) {
+export function TodoList({ todos, selectedIds, onSelect }: TodoListProps) {
   const [editingTodo, setEditingTodo] = useState<Todo | null>(null);
   const deleteTodo = useDeleteTodo();
   const toggleTodo = useToggleTodo();
@@ -28,8 +30,7 @@ export function TodoList({ todos }: TodoListProps) {
   if (todos.length === 0) {
     return (
       <div className="text-center py-12 text-muted-foreground">
-        <p className="text-lg">No todos yet</p>
-        <p className="text-sm mt-1">Create your first todo to get started</p>
+        <p className="text-lg">No todos found</p>
       </div>
     );
   }
@@ -42,6 +43,8 @@ export function TodoList({ todos }: TodoListProps) {
             key={todo.id}
             todo={todo}
             index={index}
+            isSelected={selectedIds?.includes(todo.id)}
+            onSelect={onSelect}
             onToggle={handleToggle}
             onEdit={handleEdit}
             onDelete={handleDelete}
