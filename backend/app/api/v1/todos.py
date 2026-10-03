@@ -34,7 +34,7 @@ async def list_todos(
     """Get paginated list of todos."""
     skip = (page - 1) * size
 
-    cache_key = "todos:list"
+    cache_key = f"todos:list:{current_user.id}:{page}:{size}"
 
     # Try to get from cache
     cached = await redis.get(cache_key)
@@ -68,7 +68,7 @@ async def list_todos(
         size=size,
     )
 
-    # Cache the response
+    # Cache the response scoped to this user
     await redis.set(cache_key, response.model_dump_json(), ex=CACHE_TTL)
 
     return response
@@ -79,9 +79,11 @@ async def create_new_todo(
     todo_data: TodoCreate,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    redis: RedisClient = Depends(get_redis),
 ):
     """Create a new todo item."""
     todo = await create_todo(db, todo_data, current_user.id)
+    await redis.delete_pattern(f"todos:list:{current_user.id}:*")
     return todo
 
 
@@ -97,6 +99,12 @@ async def get_todo(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Todo not found",
+        )
+
+    if todo.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to access this todo",
         )
 
     return todo
@@ -118,18 +126,27 @@ async def update_existing_todo(
             detail="Todo not found",
         )
 
-    update_data = todo_data.model_dump()
+    if todo.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to modify this todo",
+        )
 
-    if todo_data.completed:
-        todo.completed = todo_data.completed
+    # Use exclude_unset=True so fields not included in the request body
+    # are not overwritten with their default (None) value.
+    update_data = todo_data.model_dump(exclude_unset=True)
+
+    if "completed" in update_data:
+        todo.completed = update_data["completed"]
 
     # Apply other updates
-    if update_data.get("title") is not None:
+    if "title" in update_data:
         todo.title = update_data["title"]
     if "description" in update_data:
         todo.description = update_data["description"]
 
     updated_todo = await update_todo(db, todo, {})
+    await redis.delete_pattern(f"todos:list:{current_user.id}:*")
 
     return updated_todo
 
@@ -149,6 +166,13 @@ async def delete_existing_todo(
             detail="Todo not found",
         )
 
+    if todo.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to delete this todo",
+        )
+
     await delete_todo(db, todo)
+    await redis.delete_pattern(f"todos:list:{current_user.id}:*")
 
     return None
